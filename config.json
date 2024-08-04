@@ -1,0 +1,13 @@
+{
+  "discordToken": "YOUR_DISCORD_BOT_TOKEN",
+  "twitchClientId": "YOUR_TWITCH_CLIENT_ID",
+  "twitchAccessToken": "YOUR_TWITCH_ACCESS_TOKEN",
+  "discordChannelId": "YOUR_DISCORD_CHANNEL_ID",
+  "recordingsPath": "./recordings",
+  "twitchProxyPlaylist": "https://as.luminous.dev",
+  "streamsToMonitor": {
+    "channel1": true,
+    "channel2": false
+  },
+  "authorizedUserId": "YOUR_DISCORD_USER_ID"
+}

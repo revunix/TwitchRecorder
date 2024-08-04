@@ -297,6 +297,9 @@ const showMonitoringStatus = async (message) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
+    // Überprüfen, ob die Nachricht mit '!' beginnt und ignorieren, wenn dies der Fall ist
+    if (message.content.startsWith('!')) return;
+
     // Überprüfen, ob die Nachricht von einem autorisierten Benutzer stammt
     if (message.author.id !== config.authorizedUserId) {
         const embed = createEmbed('Unauthorized', 'You are not authorized to use this bot.', '#ff0000');
@@ -306,6 +309,7 @@ client.on('messageCreate', async (message) => {
 
     const args = message.content.trim().split(/\s+/);
     const command = args.shift().toLowerCase();
+
 
     if (command === '.enable') {
         const channel = args[0];

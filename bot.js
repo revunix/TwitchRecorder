@@ -128,16 +128,16 @@ const recordStream = (channel) => {
 // Funktion zum Stoppen eines Streams
 const stopStream = (channel) => {
     if (streamProcesses[channel]) {
-        console.log(`Stopping recording for channel: ${ channel } `);
+        console.log(`Stopping recording for channel: ${channel}`);
 
         // Beenden des ffmpeg-Prozesses
         if (streamProcesses[channel].ffmpegProcess) {
             try {
                 streamProcesses[channel].ffmpegProcess.stdin.end(); // Beendet den Stream von ffmpeg
                 streamProcesses[channel].ffmpegProcess.kill('SIGTERM');
-                console.log(`ffmpeg process stopped for channel: ${ channel } `);
+                console.log(`ffmpeg process stopped for channel: ${channel}`);
             } catch (error) {
-                console.error(`Error stopping ffmpeg process for channel ${ channel }: ${ error.message } `);
+                console.error(`Error stopping ffmpeg process for channel ${channel}: ${error.message}`);
             }
         }
 
@@ -145,16 +145,52 @@ const stopStream = (channel) => {
         if (streamProcesses[channel].streamlinkProcess) {
             try {
                 streamProcesses[channel].streamlinkProcess.kill('SIGTERM');
-                console.log(`streamlink process stopped for channel: ${ channel } `);
+                console.log(`streamlink process stopped for channel: ${channel}`);
             } catch (error) {
-                console.error(`Error stopping streamlink process for channel ${ channel }: ${ error.message } `);
+                console.error(`Error stopping streamlink process for channel ${channel}: ${error.message}`);
             }
         }
 
         // Entfernen der Prozesse aus der globalen Variable
         delete streamProcesses[channel];
+
+        // Überprüfen, ob Rclone-Upload aktiviert ist
+        if (config.rcloneEnabled) {
+            // Lokaler Pfad zur aufgezeichneten Datei
+            const channelPath = path.join(config.recordingsPath, channel);
+            const files = fs.readdirSync(channelPath);
+
+            files.forEach(file => {
+                const filePath = path.join(channelPath, file);
+
+                // Rclone-Befehl zum Hochladen der Datei
+                const rcloneCommand = `rclone move "${filePath}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
+
+                // Ausführen des Rclone-Befehls
+                const rcloneProcess = spawn(rcloneCommand, { shell: true });
+
+                rcloneProcess.on('exit', (code) => {
+                    if (code === 0) {
+                        console.log(`Successfully uploaded ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+                        // Überprüfen, ob die Datei noch existiert, bevor sie gelöscht wird
+                        if (fs.existsSync(filePath)) {
+                            fs.unlinkSync(filePath);
+                            console.log(`File ${filePath} does not exist, it might have already been moved.`);
+                        } else {
+                            console.log(`Successfully deleted ${filePath}`);
+                        }
+                    } else {
+                        console.error(`Failed to upload ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+                    }
+                });
+
+                rcloneProcess.on('error', (error) => {
+                    console.error(`Error uploading ${filePath}: ${error.message}`);
+                });
+            });
+        }
     } else {
-        console.log(`No recording process found for channel: ${ channel } `);
+        console.log(`No recording process found for channel: ${channel}`);
     }
 };
 

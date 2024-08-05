@@ -9,6 +9,7 @@ This repository contains a Discord bot designed to monitor and record Twitch str
 - **Dynamic Command Handling**: Allows users to control the bot via Discord commands, including enabling/disabling monitoring, starting/stopping recordings, and more.
 - **Configuration Management**: Configuration settings are managed through a `config.json` file, allowing easy adjustments for various parameters.
 - **Recording Listing**: Lists all recorded streams with clickable links for downloading.
+- **Rclone Integration**: Uploads recorded streams to a remote location using `rclone` and deletes local files after successful upload.
 
 ## Commands
 
@@ -38,6 +39,10 @@ The `config.json` file should include:
 - `streamsToMonitor`: A list of Twitch channels to monitor.
 - `authorizedUserId`: The Discord user ID of the person authorized to use the bot commands.
 - `recordingsBaseUrl`: Base URL for accessing recorded streams (e.g., `https://domain.tld/recordings/`).
+- `rcloneEnabled`: Boolean to enable/disable rclone upload feature.
+- `rcloneRemote`: The remote name configured in `rclone`.
+- `rcloneFolder`: The folder on the remote where recordings will be uploaded.
+- `rcloneConfigPath`: The path to the `rclone.conf` configuration file.
 
 ## Dependencies
 
@@ -45,6 +50,7 @@ The `config.json` file should include:
 - `axios`: For making HTTP requests to Twitch API.
 - `streamlink`: For streaming Twitch channels.
 - `ffmpeg`: For processing video streams.
+- `rclone`: For uploading files to cloud storage.
 
 ## Contribution
 

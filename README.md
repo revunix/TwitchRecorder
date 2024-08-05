@@ -10,6 +10,7 @@ This repository contains a Discord bot designed to monitor and record Twitch str
 - **Configuration Management**: Configuration settings are managed through a `config.json` file, allowing easy adjustments for various parameters.
 - **Recording Listing**: Lists all recorded streams with clickable links for downloading.
 - **Rclone Integration**: Uploads recorded streams to a remote location using `rclone` and deletes local files after successful upload.
+- **File Management**: New commands for managing files locally and remotely.
 
 ## Commands
 
@@ -21,6 +22,8 @@ This repository contains a Discord bot designed to monitor and record Twitch str
 - `.reload`: Reloads the configuration from the config file.
 - `.restart`: Restarts the bot.
 - `.recordings`: Lists all recorded streams with links to download.
+- `.upload <channel>`: Uploads the local folder for the specified channel to the cloud, if not already present.
+- `.delete <channel>`: Deletes the local folder for the specified channel from the server.
 - `.help`: Shows a help message with available commands.
 
 ## Setup

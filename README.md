@@ -8,6 +8,7 @@ This repository contains a Discord bot designed to monitor and record Twitch str
 - **Stream Recording**: Records live streams using `streamlink` and `ffmpeg`, saving the video files to a designated directory.
 - **Dynamic Command Handling**: Allows users to control the bot via Discord commands, including enabling/disabling monitoring, starting/stopping recordings, and more.
 - **Configuration Management**: Configuration settings are managed through a `config.json` file, allowing easy adjustments for various parameters.
+- **Recording Listing**: Lists all recorded streams with clickable links for downloading.
 
 ## Commands
 
@@ -18,6 +19,7 @@ This repository contains a Discord bot designed to monitor and record Twitch str
 - `.status`: Displays the current status of all monitored streams.
 - `.reload`: Reloads the configuration from the config file.
 - `.restart`: Restarts the bot.
+- `.recordings`: Lists all recorded streams with links to download.
 - `.help`: Shows a help message with available commands.
 
 ## Setup
@@ -35,6 +37,7 @@ The `config.json` file should include:
 - `discordChannelId`: The Discord channel ID where bot messages will be sent.
 - `streamsToMonitor`: A list of Twitch channels to monitor.
 - `authorizedUserId`: The Discord user ID of the person authorized to use the bot commands.
+- `recordingsBaseUrl`: Base URL for accessing recorded streams (e.g., `https://domain.tld/recordings/`).
 
 ## Dependencies
 

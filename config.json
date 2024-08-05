@@ -5,6 +5,7 @@
   "discordChannelId": "YOUR_DISCORD_CHANNEL_ID",
   "recordingsPath": "./recordings",
   "twitchProxyPlaylist": "https://as.luminous.dev",
+  "baseRecordingUrl": "https://domain.tld/recordings/",
   "streamsToMonitor": {
     "channel1": true,
     "channel2": false

@@ -4,7 +4,7 @@ const { spawn } = require('child_process');
 const { format } = require('date-fns');
 const { Client, GatewayIntentBits, MessageEmbed } = require('discord.js');
 const axios = require('axios');
-const { EmbedBuilder } = require('discord.js')
+const { EmbedBuilder } = require('discord.js');
 
 // Funktion zum Laden der Konfiguration
 const loadConfig = () => {
@@ -39,7 +39,7 @@ const client = new Client({
 
 // Event: Bot ist bereit
 client.once('ready', () => {
-    console.log(`Logged in as ${client.user.tag}!`);
+    console.log(`Logged in as ${ client.user.tag } !`);
     console.log('Bot is ready to handle commands.');
 });
 
@@ -63,10 +63,10 @@ const recordStream = (channel) => {
     }
 
     const timestamp = format(new Date(), 'dd-MM-yyyy_HH-mm-ss');
-    const filename = path.join(channelPath, `twitch-${timestamp}.mp4`);
-    const streamlinkCommand = `streamlink "https://www.twitch.tv/${channel}" "best" --twitch-proxy-playlist "${config.twitchProxyPlaylist}" --retry-streams "30" --stdout`;
+    const filename = path.join(channelPath, `twitch - ${ timestamp }.mp4`);
+    const streamlinkCommand = `streamlink "https://www.twitch.tv/${channel}" "best" --twitch - proxy - playlist "${config.twitchProxyPlaylist}" --retry - streams "30" --stdout`;
 
-    console.log(`Start recording for channel: ${channel}`);
+    console.log(`Start recording for channel: ${ channel } `);
 
     // Starten Sie den Streamlink-Prozess und speichern Sie die Prozessreferenz
     const streamlinkProcess = spawn(streamlinkCommand, {
@@ -89,32 +89,32 @@ const recordStream = (channel) => {
     };
 
     streamlinkProcess.on('exit', () => {
-        console.log(`Recording stopped for channel: ${channel}`);
+        console.log(`Recording stopped for channel: ${ channel } `);
         delete streamProcesses[channel];
     });
 
     streamlinkProcess.on('error', (error) => {
-        console.error(`Error recording stream ${channel}: ${error.message}`);
+        console.error(`Error recording stream ${ channel }: ${ error.message } `);
     });
 
     ffmpegProcess.on('error', (error) => {
-        console.error(`Error processing stream ${channel}: ${error.message}`);
+        console.error(`Error processing stream ${ channel }: ${ error.message } `);
     });
 };
 
 // Funktion zum Stoppen eines Streams
 const stopStream = (channel) => {
     if (streamProcesses[channel]) {
-        console.log(`Stopping recording for channel: ${channel}`);
+        console.log(`Stopping recording for channel: ${ channel } `);
 
         // Beenden des ffmpeg-Prozesses
         if (streamProcesses[channel].ffmpegProcess) {
             try {
                 streamProcesses[channel].ffmpegProcess.stdin.end(); // Beendet den Stream von ffmpeg
                 streamProcesses[channel].ffmpegProcess.kill('SIGTERM');
-                console.log(`ffmpeg process stopped for channel: ${channel}`);
+                console.log(`ffmpeg process stopped for channel: ${ channel } `);
             } catch (error) {
-                console.error(`Error stopping ffmpeg process for channel ${channel}: ${error.message}`);
+                console.error(`Error stopping ffmpeg process for channel ${ channel }: ${ error.message } `);
             }
         }
 
@@ -122,16 +122,16 @@ const stopStream = (channel) => {
         if (streamProcesses[channel].streamlinkProcess) {
             try {
                 streamProcesses[channel].streamlinkProcess.kill('SIGTERM');
-                console.log(`streamlink process stopped for channel: ${channel}`);
+                console.log(`streamlink process stopped for channel: ${ channel } `);
             } catch (error) {
-                console.error(`Error stopping streamlink process for channel ${channel}: ${error.message}`);
+                console.error(`Error stopping streamlink process for channel ${ channel }: ${ error.message } `);
             }
         }
 
         // Entfernen der Prozesse aus der globalen Variable
         delete streamProcesses[channel];
     } else {
-        console.log(`No recording process found for channel: ${channel}`);
+        console.log(`No recording process found for channel: ${ channel } `);
     }
 };
 
@@ -139,18 +139,18 @@ const stopStream = (channel) => {
 const checkStreamStatus = async (channel) => {
     try {
         const response = await axios.get(`https://api.twitch.tv/helix/streams?user_login=${channel}`, {
-            headers: {
-                'Client-ID': config.twitchClientId,
-                'Authorization': `Bearer ${config.twitchAccessToken}`,
+headers: {
+    'Client-ID': config.twitchClientId,
+        'Authorization': `Bearer ${config.twitchAccessToken}`,
             },
         });
 
-        const stream = response.data.data[0];
-        return stream ? stream.type === 'live' : false;
+const stream = response.data.data[0];
+return stream ? stream.type === 'live' : false;
     } catch (error) {
-        console.error(`Error checking stream status for ${channel}: ${error.message}`);
-        return false;
-    }
+    console.error(`Error checking stream status for ${channel}: ${error.message}`);
+    return false;
+}
 };
 
 // Funktion zum Holen von Streamer-Informationen
@@ -176,40 +176,53 @@ const sentMessages = new Set(); // Set zum Speichern bereits gesendeter Nachrich
 const handleStreamMonitoring = async (channel) => {
     const isLive = await checkStreamStatus(channel);
 
-    // Nachricht zum Monitoring senden, nur wenn sie noch nicht gesendet wurde
-    const discordChannelId = config.discordChannelId;
-    const monitoringChannel = client.channels.cache.get(discordChannelId);
-
-    if (monitoringChannel) {
-        const message = `Monitoring executed for channel: ${channel}`;
-        const embed = createEmbed('Stream Monitoring', message);
-
-        if (!sentMessages.has(message)) {
-            monitoringChannel.send({ embeds: [embed] });
-            sentMessages.add(message);
-        }
-    } else {
-        console.error(`Channel with ID ${discordChannelId} not found.`);
-    }
-
-    if (isLive) {
-        if (!streamProcesses[channel]) {
-            console.log(`Channel ${channel} is live. Starting recording.`);
-            recordStream(channel);
-        }
-    } else {
-        if (streamProcesses[channel]) {
-            console.log(`Channel ${channel} is not live. Stopping recording.`);
-            stopStream(channel);
-        }
-    }
+    // Nachricht zum Monitoring nur zurückgeben, anstatt sie direkt zu senden
+    return `${channel}`;
 };
 
 // Überwacht die Streams regelmäßig
 const monitorStreams = async () => {
+    const discordChannelId = config.discordChannelId;
+    const monitoringChannel = client.channels.cache.get(discordChannelId);
+
+    if (!monitoringChannel) {
+        console.error(`Channel with ID ${discordChannelId} not found.`);
+        return;
+    }
+
+    const channels = [];
     for (const channel of Object.keys(config.streamsToMonitor || {})) {
         if (config.streamsToMonitor[channel]) {
-            await handleStreamMonitoring(channel);
+            const message = await handleStreamMonitoring(channel);
+            channels.push(message);
+        }
+    }
+
+    if (channels.length > 0) {
+        const message = `*${channels.join(', ')}*`;
+
+        if (!sentMessages.has(message)) {
+            const embed = createEmbed('Stream Monitoring', message, '#7cfc00');
+            monitoringChannel.send({ embeds: [embed] });
+            sentMessages.add(message);
+        }
+    }
+
+    // Überprüfen und starten oder stoppen der Aufzeichnung für alle Kanäle
+    for (const channel of Object.keys(config.streamsToMonitor || {})) {
+        if (config.streamsToMonitor[channel]) {
+            const isLive = await checkStreamStatus(channel);
+            if (isLive) {
+                if (!streamProcesses[channel]) {
+                    console.log(`Channel ${channel} is live. Starting recording.`);
+                    recordStream(channel);
+                }
+            } else {
+                if (streamProcesses[channel]) {
+                    console.log(`Channel ${channel} is not live. Stopping recording.`);
+                    stopStream(channel);
+                }
+            }
         }
     }
 };
@@ -229,7 +242,7 @@ const reloadConfig = () => {
 // Funktion zum Neustarten des Bots
 const restartBot = (message) => {
     console.log('Restarting bot...');
-    const embed = createEmbed('Bot Restart', 'Bot is restarting...');
+    const embed = createEmbed('Bot Restart', 'Bot is restarting...', '#ff0000');
     message.reply({ embeds: [embed] });
 
     // Beenden Sie den aktuellen Bot-Prozess
@@ -256,155 +269,155 @@ const restartBot = (message) => {
 // Funktion zum Anzeigen der Hilfe-Nachricht
 const showHelp = (message) => {
     const helpText = `
-\`.record <channel>\` - Starts recording the specified channel.
-\`.stop <channel>\` - Stops recording the specified channel.
-\`.enable <channel>\` - Enables monitoring for the specified channel.
-\`.disable <channel>\` - Disables monitoring for the specified channel.
-\`.status\` - Shows the current status of all monitored streams.
-\`.reload\` - Reloads the configuration from the config file.
-\`.restart\` - Restarts the bot.
-\`.help\` - Shows this help message.
-`;
-
-    message.reply(helpText);
+        \`.record <channel>\` - Starts recording the specified channel.
+        \`.stop <channel>\` - Stops recording the specified channel.
+        \`.enable <channel>\` - Enables monitoring for the specified channel.
+        \`.disable <channel>\` - Disables monitoring for the specified channel.
+        \`.status\` - Shows the current status of the monitored channels.
+        \`.reload\` - Reloads the configuration file.
+        \`.restart\` - Restarts the bot.
+        \`.recordings\` - Lists all recorded files with download links.
+        `;
+    const embed = createEmbed('Help', helpText, '#00ff00');
+    message.reply({ embeds: [embed] });
 };
 
-// Funktion zum Anzeigen des Überwachungsstatus
-const showMonitoringStatus = async (message) => {
-    if (statusInProgress) {
-        message.reply('Status check is already in progress.');
+// Funktion zum Auflisten der Aufzeichnungen
+const listRecordings = () => {
+    const baseRecordingUrl = config.baseRecordingUrl;
+    const recordingsPath = config.recordingsPath;
+
+    const recordings = [];
+
+    const channels = fs.readdirSync(recordingsPath);
+    channels.forEach(channel => {
+        const channelPath = path.join(recordingsPath, channel);
+        const files = fs.readdirSync(channelPath);
+
+        files.forEach(file => {
+            const filePath = path.join(channelPath, file);
+            const fileUrl = `${baseRecordingUrl}${channel}/${file}`;
+            recordings.push({
+                channel,
+                file,
+                url: fileUrl,
+                timestamp: fs.statSync(filePath).mtime
+            });
+        });
+    });
+
+    return recordings;
+};
+
+// Funktion zum Anzeigen der Aufzeichnungen
+const showRecordings = (message) => {
+    const recordings = listRecordings();
+
+    if (recordings.length === 0) {
+        const embed = createEmbed('Recordings', 'No recordings found.', '#ff0000');
+        message.reply({ embeds: [embed] });
         return;
     }
 
-    statusInProgress = true;
-    try {
-        const statuses = [];
-        for (const channel of Object.keys(config.streamsToMonitor || {})) {
-            const isLive = await checkStreamStatus(channel);
-            statuses.push(`${channel}: ${isLive ? 'Live' : 'Not live'}`);
-        }
-        const embed = createEmbed('Stream Status', `Current stream statuses:\n${statuses.join('\n')}`);
-        message.reply({ embeds: [embed] });
-    } catch (error) {
-        console.error('Error showing monitoring status:', error.message);
-        message.reply('An error occurred while checking the stream statuses.');
-    } finally {
-        statusInProgress = false;
-    }
+    let description = '';
+    recordings.forEach(recording => {
+        description += `[${recording.channel} - ${recording.file}](${recording.url})\n`;
+    });
+
+    const embed = createEmbed('Recordings', description, '#0099ff');
+    message.reply({ embeds: [embed] });
 };
 
-// Event: Nachricht empfangen
+// Event: Nachricht erhalten
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // Überprüfen, ob die Nachricht mit '!' beginnt und ignorieren, wenn dies der Fall ist
-    if (message.content.startsWith('!')) return;
-
-    // Überprüfen, ob die Nachricht von einem autorisierten Benutzer stammt
-    if (message.author.id !== config.authorizedUserId) {
-        const embed = createEmbed('Unauthorized', 'You are not authorized to use this bot.', '#ff0000');
-        message.reply({ embeds: [embed] });
-        return;
-    }
-
-    const args = message.content.trim().split(/\s+/);
+    const args = message.content.trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-
-    if (command === '.enable') {
+    if (command === '.record') {
         const channel = args[0];
         if (!channel) {
-            const embed = createEmbed('Error', 'No channel specified.', '#ff0000');
-            message.reply({ embeds: [embed] });
-            return;
-        }
-
-        // Füge den Kanal zur Konfiguration hinzu, wenn er nicht vorhanden ist
-        if (!config.streamsToMonitor) {
-            config.streamsToMonitor = {};
-        }
-        config.streamsToMonitor[channel] = true;
-        saveConfig(config);
-
-        const embed = createEmbed('Monitoring Enabled', `Monitoring enabled for channel: ${channel}`);
-        message.reply({ embeds: [embed] });
-
-        // Verhindere doppelte Nachrichten
-        const enableMessage = `Monitoring enabled for channel: ${channel}`;
-        if (!sentMessages.has(enableMessage)) {
-            sentMessages.add(enableMessage);
-        }
-
-        handleStreamMonitoring(channel); // Starte die Aufnahme sofort, wenn der Stream live ist
-
-    } else if (command === '.disable') {
-        const channel = args[0];
-        if (!channel) {
-            const embed = createEmbed('Error', 'No channel specified.', '#ff0000');
-            message.reply({ embeds: [embed] });
-            return;
-        }
-
-        if (config.streamsToMonitor && config.streamsToMonitor[channel]) {
-            delete config.streamsToMonitor[channel];
-            saveConfig(config);
-            stopStream(channel);
-            const embed = createEmbed('Monitoring Disabled', `Monitoring disabled for channel: ${channel}`);
-            message.reply({ embeds: [embed] });
-        } else {
-            const embed = createEmbed('Error', `Channel ${channel} is not being monitored.`, '#ff0000');
-            message.reply({ embeds: [embed] });
-        }
-
-    } else if (command === '.status') {
-        await showMonitoringStatus(message);
-
-    } else if (command === '.reload') {
-        const result = reloadConfig();
-        const embed = createEmbed('Configuration Reloaded', result);
-        message.reply({ embeds: [embed] });
-
-    } else if (command === '.restart') {
-        restartBot(message);
-
-    } else if (command === '.record') {
-        const channel = args[0];
-        if (!channel) {
-            const embed = createEmbed('Error', 'No channel specified.', '#ff0000');
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
             message.reply({ embeds: [embed] });
             return;
         }
         recordStream(channel);
-        const embed = createEmbed('Recording Started', `Started recording for channel: ${channel}`);
+        const embed = createEmbed('Recording', `Started recording for channel: ${channel}`, '#00ff00');
         message.reply({ embeds: [embed] });
+    }
 
-    } else if (command === '.stop') {
+    if (command === '.stop') {
         const channel = args[0];
         if (!channel) {
-            const embed = createEmbed('Error', 'No channel specified.', '#ff0000');
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
             message.reply({ embeds: [embed] });
             return;
         }
+        stopStream(channel);
+        const embed = createEmbed('Stopped', `Stopped recording for channel: ${channel}`, '#ff0000');
+        message.reply({ embeds: [embed] });
+    }
 
-        if (streamProcesses[channel]) {
-            stopStream(channel);
-            const embed = createEmbed('Recording Stopped', `Stopped recording for channel: ${channel}`);
+    if (command === '.enable') {
+        const channel = args[0];
+        if (!channel) {
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
             message.reply({ embeds: [embed] });
-        } else {
-            const embed = createEmbed('Error', `No recording process found for channel ${channel}.`, '#ff0000');
+            return;
+        }
+        config.streamsToMonitor[channel] = true;
+        saveConfig(config);
+        const embed = createEmbed('Enabled', `Enabled monitoring for channel: ${channel}`, '#00ff00');
+        message.reply({ embeds: [embed] });
+    }
+
+    if (command === '.disable') {
+        const channel = args[0];
+        if (!channel) {
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
+            message.reply({ embeds: [embed] });
+            return;
+        }
+        delete config.streamsToMonitor[channel];
+        saveConfig(config);
+        const embed = createEmbed('Disabled', `Disabled monitoring for channel: ${channel}`, '#ff0000');
+        message.reply({ embeds: [embed] });
+    }
+
+    if (command === '.status') {
+        const embed = createEmbed('Status', 'Checking stream statuses...', '#0099ff');
+        message.reply({ embeds: [embed] });
+
+        for (const channel of Object.keys(config.streamsToMonitor || {})) {
+            const isLive = await checkStreamStatus(channel);
+            const statusMessage = isLive ? 'LIVE' : 'OFFLINE';
+            const embed = createEmbed('Status', `${channel} is currently ${statusMessage}`, isLive ? '#00ff00' : '#ff0000');
             message.reply({ embeds: [embed] });
         }
+    }
 
-    } else if (command === '.help') {
-        showHelp(message);
-
-    } else {
-        const embed = createEmbed('Unknown Command', 'Unknown command.');
+    if (command === '.reload') {
+        const response = reloadConfig();
+        const embed = createEmbed('Reload Config', response, response.includes('Error') ? '#ff0000' : '#00ff00');
         message.reply({ embeds: [embed] });
+    }
+
+    if (command === '.restart') {
+        restartBot(message);
+    }
+
+    if (command === '.help') {
+        showHelp(message);
+    }
+
+    if (command === '.recordings') {
+        showRecordings(message);
     }
 });
 
-setInterval(monitorStreams, 60000);
-
-// Bot anmelden
+// Starten Sie den Bot
 client.login(config.discordToken);
+
+// Starte das Monitoring der Streams alle 5 Minuten
+setInterval(monitorStreams, 5 * 60 * 1000);

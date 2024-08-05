@@ -86,7 +86,7 @@ const recordStream = (channel) => {
     }
 
     const timestamp = format(new Date(), 'dd-MM-yyyy_HH-mm-ss');
-    const filename = path.join(channelPath, `twitch-${timestamp}.mp4`);
+    const filename = path.join(channelPath, `twitch-${channel}-${timestamp}.mp4`);
     const streamlinkCommand = `streamlink "https://www.twitch.tv/${channel}" "best" --twitch-proxy-playlist "${config.twitchProxyPlaylist}" --retry-streams "30" --stdout`;
 
     console.log(`Start recording for channel: ${channel}`);
@@ -164,7 +164,7 @@ const stopStream = (channel) => {
                 const filePath = path.join(channelPath, file);
 
                 // Rclone-Befehl zum Hochladen der Datei
-                const rcloneCommand = `rclone move "${filePath}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
+                const rcloneCommand = `rclone copy "${filePath}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
 
                 // Ausführen des Rclone-Befehls
                 const rcloneProcess = spawn(rcloneCommand, { shell: true });
@@ -172,13 +172,6 @@ const stopStream = (channel) => {
                 rcloneProcess.on('exit', (code) => {
                     if (code === 0) {
                         console.log(`Successfully uploaded ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
-                        // Überprüfen, ob die Datei noch existiert, bevor sie gelöscht wird
-                        if (fs.existsSync(filePath)) {
-                            fs.unlinkSync(filePath);
-                            console.log(`File ${filePath} does not exist, it might have already been moved.`);
-                        } else {
-                            console.log(`Successfully deleted ${filePath}`);
-                        }
                     } else {
                         console.error(`Failed to upload ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
                     }
@@ -314,7 +307,23 @@ const restartBot = (message) => {
         console.error('Error destroying bot:', error.message);
     });
 };
+// Funktion zum Löschen des Ordners für einen bestimmten Kanal vom lokalen Server
+const deleteChannelFolder = (channel) => {
+    const channelPath = path.join(config.recordingsPath, channel);
 
+    if (!fs.existsSync(channelPath)) {
+        console.error(`Channel path ${channelPath} does not exist.`);
+        return;
+    }
+
+    // Löschen des Ordners und aller darin enthaltenen Dateien
+    try {
+        fs.rmSync(channelPath, { recursive: true, force: true });
+        console.log(`Successfully deleted local folder for channel: ${channel}`);
+    } catch (error) {
+        console.error(`Failed to delete local folder for channel ${channel}: ${error.message}`);
+    }
+};
 // Funktion zum Anzeigen der Hilfe-Nachricht
 const showHelp = (message) => {
     const helpText = `
@@ -389,6 +398,111 @@ const showRecordings = (message) => {
 
     const embed = createEmbed('Recordings', description, '#0099ff');
     message.reply({ embeds: [embed] });
+};
+
+// Funktion zum Hochladen eines Ordners
+const uploadChannelFolder = (channel) => {
+    const channelPath = path.join(config.recordingsPath, channel);
+    if (!fs.existsSync(channelPath)) {
+        console.error(`Channel path ${channelPath} does not exist.`);
+        return;
+    }
+
+    const cloudFolderPath = `${config.rcloneRemote}:${config.rcloneFolder}/${channel}`;
+
+    // Verzeichnis in der Cloud erstellen, falls es nicht existiert
+    const rcloneMkdirCommand = `rclone mkdir "${cloudFolderPath}" --config "${config.rcloneConfigPath}"`;
+
+    console.log(`Executing command to create cloud folder: ${rcloneMkdirCommand}`); // Debugging log
+
+    const rcloneMkdirProcess = spawn(rcloneMkdirCommand, { shell: true });
+
+    rcloneMkdirProcess.stdout.on('data', (data) => {
+        console.log(`rclone mkdir output: ${data.toString()}`); // Debugging log
+    });
+
+    rcloneMkdirProcess.stderr.on('data', (data) => {
+        console.error(`Error output from rclone mkdir command: ${data.toString()}`); // Debugging log
+    });
+
+    rcloneMkdirProcess.on('exit', (mkdirCode) => {
+        console.log(`rclone mkdir command exited with code: ${mkdirCode}`); // Debugging log
+
+        if (mkdirCode === 0 || mkdirCode === 3) { // 3 bedeutet Verzeichnis existiert bereits
+            const rcloneCheckCommand = `rclone lsf "${cloudFolderPath}" --config "${config.rcloneConfigPath}"`;
+
+            console.log(`Executing command to check cloud files: ${rcloneCheckCommand}`); // Debugging log
+
+            // Überprüfen, ob die Daten bereits in der Cloud vorhanden sind
+            const rcloneCheckProcess = spawn(rcloneCheckCommand, { shell: true });
+
+            let cloudFiles = '';
+            rcloneCheckProcess.stdout.on('data', (data) => {
+                cloudFiles += data.toString();
+            });
+
+            rcloneCheckProcess.stderr.on('data', (data) => {
+                console.error(`Error output from rclone check command: ${data.toString()}`); // Debugging log
+            });
+
+            rcloneCheckProcess.on('exit', (code) => {
+                console.log(`rclone check command exited with code: ${code}`); // Debugging log
+
+                if (code === 0) {
+                    console.log(`Cloud files for channel ${channel}: ${cloudFiles}`); // Debugging log
+
+                    const localFiles = fs.readdirSync(channelPath);
+                    console.log(`Local files for channel ${channel}: ${localFiles}`); // Debugging log
+
+                    const cloudFilesList = cloudFiles.split('\n').filter(file => file.trim() !== '');
+                    console.log(`Filtered cloud files list for channel ${channel}: ${cloudFilesList}`); // Debugging log
+
+                    // Filter local files to include only .mp4 files
+                    const localMp4Files = localFiles.filter(file => file.endsWith('.mp4'));
+                    const filesToUpload = localMp4Files.filter(file => !cloudFilesList.includes(file));
+                    console.log(`Files to upload for channel ${channel}: ${filesToUpload}`); // Debugging log
+
+                    if (filesToUpload.length === 0) {
+                        console.log(`All .mp4 files for channel ${channel} are already in the cloud.`);
+                        return;
+                    }
+
+                    // Rclone-Befehl zum Hochladen des Ordners mit --include
+                    const rcloneCommand = `rclone copy "${channelPath}" "${cloudFolderPath}" --include "*.mp4" --config "${config.rcloneConfigPath}"`;
+                    console.log(`Executing command to upload files: ${rcloneCommand}`); // Debugging log
+
+                    // Ausführen des Rclone-Befehls
+                    const rcloneProcess = spawn(rcloneCommand, { shell: true });
+
+                    rcloneProcess.on('exit', (uploadCode) => {
+                        console.log(`rclone upload command exited with code: ${uploadCode}`); // Debugging log
+
+                        if (uploadCode === 0) {
+                            console.log(`Successfully uploaded .mp4 files from folder ${channelPath} to ${cloudFolderPath}`);
+                        } else {
+                            console.error(`Failed to upload .mp4 files from folder ${channelPath} to ${cloudFolderPath}`);
+                        }
+                    });
+
+                    rcloneProcess.on('error', (error) => {
+                        console.error(`Error uploading .mp4 files from folder ${channelPath}: ${error.message}`);
+                    });
+                } else {
+                    console.error(`Failed to check cloud files for channel ${channel}`);
+                }
+            });
+
+            rcloneCheckProcess.on('error', (error) => {
+                console.error(`Error checking cloud files for channel ${channel}: ${error.message}`);
+            });
+        } else {
+            console.error(`Failed to create cloud folder ${cloudFolderPath}`);
+        }
+    });
+
+    rcloneMkdirProcess.on('error', (error) => {
+        console.error(`Error creating cloud folder ${cloudFolderPath}: ${error.message}`);
+    });
 };
 
 // Event: Nachricht erhalten
@@ -476,6 +590,28 @@ client.on('messageCreate', async (message) => {
 
     if (command === '.recordings') {
         showRecordings(message);
+    }
+    if (command === '.delete') {
+        const channel = args[0];
+        if (!channel) {
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
+            message.reply({ embeds: [embed] });
+            return;
+        }
+        deleteChannelFolder(channel);
+        const embed = createEmbed('Deleted', `Deleted local folder for channel: ${channel}`, '#ff0000');
+        message.reply({ embeds: [embed] });
+    }
+    if (command === '.upload') {
+        const channel = args[0];
+        if (!channel) {
+            const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
+            message.reply({ embeds: [embed] });
+            return;
+        }
+        uploadChannelFolder(channel);
+        const embed = createEmbed('Uploading', `Started uploading folder for channel: ${channel}`, '#00ff00');
+        message.reply({ embeds: [embed] });
     }
 });
 

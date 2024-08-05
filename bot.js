@@ -200,42 +200,41 @@ const monitorStreams = async () => {
     }
 
     const channels = [];
+    let statusUpdate = '';
+
     for (const channel of Object.keys(config.streamsToMonitor || {})) {
         if (config.streamsToMonitor[channel]) {
-            // Überprüfe den Live-Status des Kanals
+            // Check the live status of the channel
             const isLive = await checkStreamStatus(channel);
             const statusMessage = isLive ? 'LIVE' : 'OFFLINE';
 
-            // Erstelle die Embed-Nachricht für den Kanal
-            const embed = createEmbed('Stream Monitoring', `${channel} is currently ${statusMessage}`, isLive ? '#00ff00' : '#ff0000');
-            
-            // Sende die Nachricht, wenn der Status sich geändert hat oder nicht bereits gesendet wurde
-            if (!sentMessages.has(channel + statusMessage)) {
-                monitoringChannel.send({ embeds: [embed] });
-                sentMessages.add(channel + statusMessage);
-            }
+            // Add status to the update message
+            statusUpdate += `**${channel}** is currently **${statusMessage}**\n`;
 
-            channels.push(channel);
+            // Start or stop recording based on status
+            if (isLive) {
+                if (!streamProcesses[channel]) {
+                    console.log(`Channel **${channel}** is live. Starting recording.`);
+                    recordStream(channel);
+                }
+            } else {
+                if (streamProcesses[channel]) {
+                    console.log(`Channel **${channel}** is not live. Stopping recording.`);
+                    stopStream(channel);
+                }
+            }
         }
     }
 
-    // Überprüfen und starten oder stoppen der Aufzeichnung für alle Kanäle
-    for (const channel of channels) {
-        const isLive = await checkStreamStatus(channel);
-        if (isLive) {
-            if (!streamProcesses[channel]) {
-                console.log(`Channel ${channel} is live. Starting recording.`);
-                recordStream(channel);
-            }
-        } else {
-            if (streamProcesses[channel]) {
-                console.log(`Channel ${channel} is not live. Stopping recording.`);
-                stopStream(channel);
-            }
+    // Send consolidated status update if there are changes
+    if (statusUpdate.trim()) {
+        const embed = createEmbed('Stream Monitoring', statusUpdate.trim(), '#00ff00');
+        if (!sentMessages.has(statusUpdate.trim())) {
+            monitoringChannel.send({ embeds: [embed] });
+            sentMessages.add(statusUpdate.trim());
         }
     }
 };
-
 
 
 // Funktion zum Neuladen der Konfiguration

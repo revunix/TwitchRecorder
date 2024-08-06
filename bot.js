@@ -295,26 +295,6 @@ const deleteChannelFolder = (channel) => {
     }
 };
 
-// Funktion zum Anzeigen der Hilfe-Nachricht
-const showHelp = (message) => {
-    const helpText = `
-        \`.record <channel>\` - Starts recording the specified channel.
-        \`.stop <channel>\` - Stops recording the specified channel.
-        \`.enable <channel>\` - Enables monitoring for the specified channel.
-        \`.disable <channel>\` - Disables monitoring for the specified channel.
-        \`.status\` - Shows the current status of the monitored channels.
-        \`.reload\` - Reloads the configuration file.
-        \`.restart\` - Restarts the bot.
-        \`.recordings\` - Lists all recorded files with download links.
-        \`.delete <channel>\` - Deletes the local folder for the specified channel.
-        \`.upload <channel>\` - Uploads the folder for the specified channel.
-        \`.m3u8 <url>\` - Starts recording an m3u8 stream.
-        \`.stop-m3u8 <id>\` - Stops recording an m3u8 stream.
-        `;
-    const embed = createEmbed('Help', helpText, '#00ff00');
-    message.reply({ embeds: [embed] });
-};
-
 // Funktion zum Auflisten der Aufzeichnungen
 const listRecordings = () => {
     const baseRecordingUrl = config.baseRecordingUrl;
@@ -499,7 +479,7 @@ const recordM3u8Stream = (url) => {
             '--retry-sleep', '10',
             '--fragment-retries', 'infinite',
             '--hls-use-mpegts', 
-            '-f', 'best',  // Immer die beste Qualität verwenden
+            '-f', 'bestvideo+bestaudio/best',  // Versuche die beste Video- und Audioqualität zu kombinieren, falls verfügbar
             url
         ], {
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -536,7 +516,7 @@ const recordM3u8Stream = (url) => {
 // Funktion zum Stoppen eines m3u8 Streams
 const stopM3u8Stream = (id) => {
     if (m3u8Processes.has(id)) {
-        const { ytDlpProcess, filename } = m3u8Processes.get(id);
+        const { ytDlpProcess, filename: originalFilename } = m3u8Processes.get(id);
         
         // Sende SIGINT anstelle von SIGTERM
         ytDlpProcess.kill('SIGINT');
@@ -545,17 +525,26 @@ const stopM3u8Stream = (id) => {
         ytDlpProcess.on('exit', (code) => {
             console.log(`yt-dlp process exited with code ${code}`);
             
+            let finalFilename = originalFilename;
+            
             // Entferne .part Erweiterung, falls vorhanden
-            if (fs.existsSync(`${filename}.part`)) {
-                fs.renameSync(`${filename}.part`, filename);
-                console.log(`Renamed ${filename}.part to ${filename}`);
+            if (fs.existsSync(`${originalFilename}.part`)) {
+                fs.renameSync(`${originalFilename}.part`, originalFilename);
+                console.log(`Renamed ${originalFilename}.part to ${originalFilename}`);
+            }
+            
+            // Überprüfe, ob die Datei als .mkv gespeichert wurde und benenne sie um
+            if (fs.existsSync(`${originalFilename}.mkv`)) {
+                finalFilename = originalFilename.replace('.mp4.mkv', '.mp4');
+                fs.renameSync(`${originalFilename}.mkv`, finalFilename);
+                console.log(`Renamed ${originalFilename}.mkv to ${finalFilename}`);
             }
             
             m3u8Processes.delete(id);
             console.log(`Stopped recording m3u8 stream with ID: ${id}`);
             
             // Starte den Upload-Prozess nach dem Stoppen der Aufnahme
-            uploadToCloud(filename);
+            uploadToCloud(finalFilename);
         });
     } else {
         console.log(`No recording process found for m3u8 stream with ID: ${id}`);
@@ -590,7 +579,7 @@ client.on('messageCreate', async (message) => {
     const args = message.content.trim().split(/ +/);
     const command = args.shift().toLowerCase();
 
-    if (command === '.record') {
+    if (command === '.start') {
         const channel = args[0];
         if (!channel) {
             const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
@@ -614,7 +603,7 @@ client.on('messageCreate', async (message) => {
         message.reply({ embeds: [embed] });
     }
 
-    if (command === '.enable') {
+    if (command === '.watch') {
         const channel = args[0];
         if (!channel) {
             const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
@@ -623,11 +612,11 @@ client.on('messageCreate', async (message) => {
         }
         config.streamsToMonitor[channel] = true;
         saveConfig(config);
-        const embed = createEmbed('Enabled', `Enabled monitoring for channel: ${channel}`, '#00ff00');
+        const embed = createEmbed('Watching', `Started monitoring channel: ${channel}`, '#00ff00');
         message.reply({ embeds: [embed] });
     }
 
-    if (command === '.disable') {
+    if (command === '.unwatch') {
         const channel = args[0];
         if (!channel) {
             const embed = createEmbed('Error', 'Please provide a channel name.', '#ff0000');
@@ -636,20 +625,22 @@ client.on('messageCreate', async (message) => {
         }
         delete config.streamsToMonitor[channel];
         saveConfig(config);
-        const embed = createEmbed('Disabled', `Disabled monitoring for channel: ${channel}`, '#ff0000');
+        const embed = createEmbed('Unwatched', `Stopped monitoring channel: ${channel}`, '#ff0000');
         message.reply({ embeds: [embed] });
     }
 
-    if (command === '.status') {
-        const embed = createEmbed('Status', 'Checking stream statuses...', '#0099ff');
-        message.reply({ embeds: [embed] });
+    if (command === '.watchlist') {
+        let statusUpdate = 'Checking stream statuses...\n\n';
 
         for (const channel of Object.keys(config.streamsToMonitor || {})) {
             const isLive = await checkStreamStatus(channel);
-            const statusMessage = isLive ? 'LIVE' : 'OFFLINE';
-            const embed = createEmbed('Status', `${channel} is currently ${statusMessage}`, isLive ? '#00ff00' : '#ff0000');
-            message.reply({ embeds: [embed] });
+            const statusMessage = isLive ? '**LIVE**' : '**OFFLINE**';
+            const color = isLive ? '#00ff00' : '#ff0000';
+            statusUpdate += `${channel} is currently ${statusMessage}\n`;
         }
+
+        const embed = createEmbed('Watchlist Status', statusUpdate.trim(), '#0099ff');
+        message.reply({ embeds: [embed] });
     }
 
     if (command === '.reload') {
@@ -666,7 +657,7 @@ client.on('messageCreate', async (message) => {
         showHelp(message);
     }
 
-    if (command === '.recordings') {
+    if (command === '.list') {
         showRecordings(message);
     }
 
@@ -694,7 +685,7 @@ client.on('messageCreate', async (message) => {
         message.reply({ embeds: [embed] });
     }
 
-    if (command === '.m3u8') {
+    if (command === '.record') {
         const url = args[0];
         if (!url) {
             const embed = createEmbed('Error', 'Please provide a m3u8 URL.', '#ff0000');
@@ -702,11 +693,11 @@ client.on('messageCreate', async (message) => {
             return;
         }
         const id = recordM3u8Stream(url);
-        const embed = createEmbed('Recording M3U8', `Started recording m3u8 stream with ID: ${id}`, '#00ff00');
+        const embed = createEmbed('Recording', `Started recording m3u8 stream with ID: ${id}`, '#00ff00');
         message.reply({ embeds: [embed] });
     }
 
-    if (command === '.stop-m3u8') {
+    if (command === '.end') {
         const id = args[0];
         if (!id) {
             const embed = createEmbed('Error', 'Please provide a m3u8 stream ID.', '#ff0000');
@@ -714,13 +705,35 @@ client.on('messageCreate', async (message) => {
             return;
         }
         stopM3u8Stream(id);
-        const embed = createEmbed('Stopped M3U8', `Stopped recording m3u8 stream with ID: ${id}`, '#ff0000');
+        const embed = createEmbed('Ended', `Stopped recording m3u8 stream with ID: ${id}`, '#ff0000');
         message.reply({ embeds: [embed] });
     }
 });
 
-// Starten Sie den Bot
+
+// Function to display the help message
+const showHelp = (message) => {
+    const helpText = `
+        \`.start <channel>\` - Starts recording the specified channel.
+        \`.stop <channel>\` - Stops recording the specified channel.
+        \`.record <url>\` - Starts recording an m3u8 stream.
+        \`.end <id>\` - Stops recording an m3u8 stream.
+        \`.watch <channel>\` - Activates monitoring for the specified channel.
+        \`.unwatch <channel>\` - Deactivates monitoring for the specified channel.
+        \`.watchlist\` - Shows the current status of monitored channels.
+        \`.reload\` - Reloads the configuration file.
+        \`.restart\` - Restarts the bot.
+        \`.list\` - Lists all recorded files with download links.
+        \`.delete <channel>\` - Deletes the local folder for the specified channel.
+        \`.upload <channel>\` - Uploads the folder for the specified channel.
+        \`.help\` - Displays this help message.
+        `;
+    const embed = createEmbed('Help', helpText, '#00ff00');
+    message.reply({ embeds: [embed] });
+};
+
+// Start the bot
 client.login(config.discordToken);
 
-// Starte das Monitoring der Streams alle 60 Sekunden
+// Start monitoring the streams every 60 seconds
 setInterval(monitorStreams, 60 * 1000);

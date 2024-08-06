@@ -2,9 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { format } = require('date-fns');
-const { Client, GatewayIntentBits, MessageEmbed } = require('discord.js');
+const { Client, GatewayIntentBits } = require('discord.js');
 const axios = require('axios');
 const { EmbedBuilder } = require('discord.js');
+const crypto = require('crypto');
 
 // Funktion zum Laden der Konfiguration
 const loadConfig = () => {
@@ -37,7 +38,7 @@ const client = new Client({
     ],
 });
 
-let hasSentStartupMessage = false; // Variable zum Verfolgen des Nachrichtenstatus
+let hasSentStartupMessage = false;
 
 // Funktion zum Senden der Startnachricht
 const sendStartupMessage = async () => {
@@ -60,15 +61,17 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     console.log('Bot is ready to handle commands.');
 
-    // Sende die Startnachricht nur beim ersten Start
     if (!hasSentStartupMessage) {
         await sendStartupMessage();
         hasSentStartupMessage = true;
     }
 });
 
-// Variable zum Speichern der laufenden Prozesse
-const streamProcesses = {};
+// Map zum Speichern der laufenden Prozesse
+const streamProcesses = new Map();
+
+// Map zum Speichern der m3u8 Prozesse
+const m3u8Processes = new Map();
 
 // Funktion zum Erstellen eines Embeds
 const createEmbed = (title, description, color = '#0099ff') => {
@@ -81,9 +84,7 @@ const createEmbed = (title, description, color = '#0099ff') => {
 // Funktion zum Aufnehmen eines Streams
 const recordStream = (channel) => {
     const channelPath = path.join(config.recordingsPath, channel);
-    if (!fs.existsSync(channelPath)) {
-        fs.mkdirSync(channelPath, { recursive: true });
-    }
+    fs.mkdirSync(channelPath, { recursive: true });
 
     const timestamp = format(new Date(), 'dd-MM-yyyy_HH-mm-ss');
     const filename = path.join(channelPath, `twitch-${channel}-${timestamp}.mp4`);
@@ -91,29 +92,25 @@ const recordStream = (channel) => {
 
     console.log(`Start recording for channel: ${channel}`);
 
-    // Starten Sie den Streamlink-Prozess und speichern Sie die Prozessreferenz
     const streamlinkProcess = spawn(streamlinkCommand, {
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    // Starten Sie den ffmpeg-Prozess und verbinden Sie ihn mit dem Streamlink-Prozess
     const ffmpegProcess = spawn('ffmpeg', ['-i', '-', '-c', 'copy', filename], {
         stdio: ['pipe', 'inherit', 'inherit'],
     });
 
-    // Pipe stdout von Streamlink zu stdin von ffmpeg
     streamlinkProcess.stdout.pipe(ffmpegProcess.stdin);
 
-    // Speichern beider Prozesse
-    streamProcesses[channel] = {
-        streamlinkProcess,
-        ffmpegProcess
-    };
+    streamProcesses.set(channel, { streamlinkProcess, ffmpegProcess });
 
     streamlinkProcess.on('exit', () => {
         console.log(`Recording stopped for channel: ${channel}`);
-        delete streamProcesses[channel];
+        streamProcesses.delete(channel);
+        if (config.rcloneEnabled) {
+            uploadRecordings(channel);
+        }
     });
 
     streamlinkProcess.on('error', (error) => {
@@ -127,64 +124,61 @@ const recordStream = (channel) => {
 
 // Funktion zum Stoppen eines Streams
 const stopStream = (channel) => {
-    if (streamProcesses[channel]) {
+    if (streamProcesses.has(channel)) {
         console.log(`Stopping recording for channel: ${channel}`);
 
-        // Beenden des ffmpeg-Prozesses
-        if (streamProcesses[channel].ffmpegProcess) {
+        const { ffmpegProcess, streamlinkProcess } = streamProcesses.get(channel);
+
+        if (ffmpegProcess) {
             try {
-                streamProcesses[channel].ffmpegProcess.stdin.end(); // Beendet den Stream von ffmpeg
-                streamProcesses[channel].ffmpegProcess.kill('SIGTERM');
+                ffmpegProcess.stdin.end();
+                ffmpegProcess.kill('SIGTERM');
                 console.log(`ffmpeg process stopped for channel: ${channel}`);
             } catch (error) {
                 console.error(`Error stopping ffmpeg process for channel ${channel}: ${error.message}`);
             }
         }
 
-        // Beenden des Streamlink-Prozesses
-        if (streamProcesses[channel].streamlinkProcess) {
+        if (streamlinkProcess) {
             try {
-                streamProcesses[channel].streamlinkProcess.kill('SIGTERM');
+                streamlinkProcess.kill('SIGTERM');
                 console.log(`streamlink process stopped for channel: ${channel}`);
             } catch (error) {
                 console.error(`Error stopping streamlink process for channel ${channel}: ${error.message}`);
             }
         }
 
-        // Entfernen der Prozesse aus der globalen Variable
-        delete streamProcesses[channel];
+        streamProcesses.delete(channel);
 
-        // Überprüfen, ob Rclone-Upload aktiviert ist
-        if (config.rcloneEnabled) {
-            // Lokaler Pfad zur aufgezeichneten Datei
-            const channelPath = path.join(config.recordingsPath, channel);
-            const files = fs.readdirSync(channelPath);
-
-            files.forEach(file => {
-                const filePath = path.join(channelPath, file);
-
-                // Rclone-Befehl zum Hochladen der Datei
-                const rcloneCommand = `rclone copy "${filePath}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
-
-                // Ausführen des Rclone-Befehls
-                const rcloneProcess = spawn(rcloneCommand, { shell: true });
-
-                rcloneProcess.on('exit', (code) => {
-                    if (code === 0) {
-                        console.log(`Successfully uploaded ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
-                    } else {
-                        console.error(`Failed to upload ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
-                    }
-                });
-
-                rcloneProcess.on('error', (error) => {
-                    console.error(`Error uploading ${filePath}: ${error.message}`);
-                });
-            });
-        }
+        // Der Upload wird jetzt in der 'exit' Event-Handler von streamlinkProcess gehandhabt
     } else {
         console.log(`No recording process found for channel: ${channel}`);
     }
+};
+
+// Funktion zum Hochladen der Aufnahmen
+const uploadRecordings = (channel) => {
+    const channelPath = path.join(config.recordingsPath, channel);
+    const files = fs.readdirSync(channelPath);
+
+    files.forEach(file => {
+        const filePath = path.join(channelPath, file);
+        const rcloneCommand = `rclone copy "${filePath}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
+
+        const rcloneProcess = spawn(rcloneCommand, { shell: true });
+
+        rcloneProcess.on('exit', (code) => {
+            if (code === 0) {
+                console.log(`Successfully uploaded ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+            } else {
+                console.error(`Failed to upload ${filePath} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+            }
+        });
+
+        rcloneProcess.on('error', (error) => {
+            console.error(`Error uploading ${filePath}: ${error.message}`);
+        });
+    });
 };
 
 // Funktion zum Überprüfen des Live-Status eines Streams
@@ -208,15 +202,7 @@ const checkStreamStatus = async (channel) => {
     }
 };
 
-const sentMessages = new Set(); // Set zum Speichern bereits gesendeter Nachrichten
-
-// Funktion zum Starten der Aufzeichnung basierend auf dem Live-Status
-const handleStreamMonitoring = async (channel) => {
-    const isLive = await checkStreamStatus(channel);
-
-    // Nachricht zum Monitoring nur zurückgeben, anstatt sie direkt zu senden
-    return `${channel}`;
-};
+const sentMessages = new Set();
 
 // Überwacht die Streams regelmäßig
 const monitorStreams = async () => {
@@ -228,43 +214,31 @@ const monitorStreams = async () => {
         return;
     }
 
-    const channels = [];
     let statusUpdate = '';
 
-    for (const channel of Object.keys(config.streamsToMonitor || {})) {
-        if (config.streamsToMonitor[channel]) {
-            // Check the live status of the channel
+    for (const [channel, shouldMonitor] of Object.entries(config.streamsToMonitor || {})) {
+        if (shouldMonitor) {
             const isLive = await checkStreamStatus(channel);
             const statusMessage = isLive ? 'LIVE' : 'OFFLINE';
 
-            // Add status to the update message
             statusUpdate += `**${channel}** is currently **${statusMessage}**\n`;
 
-            // Start or stop recording based on status
-            if (isLive) {
-                if (!streamProcesses[channel]) {
-                    console.log(`Channel **${channel}** is live. Starting recording.`);
-                    recordStream(channel);
-                }
-            } else {
-                if (streamProcesses[channel]) {
-                    console.log(`Channel **${channel}** is not live. Stopping recording.`);
-                    stopStream(channel);
-                }
+            if (isLive && !streamProcesses.has(channel)) {
+                console.log(`Channel **${channel}** is live. Starting recording.`);
+                recordStream(channel);
+            } else if (!isLive && streamProcesses.has(channel)) {
+                console.log(`Channel **${channel}** is not live. Stopping recording.`);
+                stopStream(channel);
             }
         }
     }
 
-    // Send consolidated status update if there are changes
-    if (statusUpdate.trim()) {
+    if (statusUpdate.trim() && !sentMessages.has(statusUpdate.trim())) {
         const embed = createEmbed('Stream Monitoring', statusUpdate.trim(), '#00ff00');
-        if (!sentMessages.has(statusUpdate.trim())) {
-            monitoringChannel.send({ embeds: [embed] });
-            sentMessages.add(statusUpdate.trim());
-        }
+        monitoringChannel.send({ embeds: [embed] });
+        sentMessages.add(statusUpdate.trim());
     }
 };
-
 
 // Funktion zum Neuladen der Konfiguration
 const reloadConfig = () => {
@@ -284,11 +258,9 @@ const restartBot = (message) => {
     const embed = createEmbed('Bot Restart', 'Bot is restarting...', '#ff0000');
     message.reply({ embeds: [embed] });
 
-    // Beenden Sie den aktuellen Bot-Prozess
     client.destroy().then(() => {
         console.log('Bot destroyed. Restarting...');
 
-        // Starten Sie einen neuen Prozess
         const newProcess = spawn('bun', ['run', 'bot.js'], {
             stdio: 'inherit',
             shell: true
@@ -298,15 +270,14 @@ const restartBot = (message) => {
             console.error('Error restarting bot:', error.message);
         });
 
-        // Setze die Variable zurück, um die Nachricht nach dem Neustart zu senden
         hasSentStartupMessage = false;
 
-        // Beenden Sie den aktuellen Prozess
         process.exit();
     }).catch((error) => {
         console.error('Error destroying bot:', error.message);
     });
 };
+
 // Funktion zum Löschen des Ordners für einen bestimmten Kanal vom lokalen Server
 const deleteChannelFolder = (channel) => {
     const channelPath = path.join(config.recordingsPath, channel);
@@ -316,7 +287,6 @@ const deleteChannelFolder = (channel) => {
         return;
     }
 
-    // Löschen des Ordners und aller darin enthaltenen Dateien
     try {
         fs.rmSync(channelPath, { recursive: true, force: true });
         console.log(`Successfully deleted local folder for channel: ${channel}`);
@@ -324,6 +294,7 @@ const deleteChannelFolder = (channel) => {
         console.error(`Failed to delete local folder for channel ${channel}: ${error.message}`);
     }
 };
+
 // Funktion zum Anzeigen der Hilfe-Nachricht
 const showHelp = (message) => {
     const helpText = `
@@ -335,6 +306,10 @@ const showHelp = (message) => {
         \`.reload\` - Reloads the configuration file.
         \`.restart\` - Restarts the bot.
         \`.recordings\` - Lists all recorded files with download links.
+        \`.delete <channel>\` - Deletes the local folder for the specified channel.
+        \`.upload <channel>\` - Uploads the folder for the specified channel.
+        \`.m3u8 <url>\` - Starts recording an m3u8 stream.
+        \`.stop-m3u8 <id>\` - Stops recording an m3u8 stream.
         `;
     const embed = createEmbed('Help', helpText, '#00ff00');
     message.reply({ embeds: [embed] });
@@ -377,7 +352,6 @@ const showRecordings = (message) => {
         return;
     }
 
-    // Gruppiere Aufzeichnungen nach Kanal
     const groupedRecordings = recordings.reduce((acc, recording) => {
         if (!acc[recording.channel]) {
             acc[recording.channel] = [];
@@ -386,7 +360,6 @@ const showRecordings = (message) => {
         return acc;
     }, {});
 
-    // Erstelle die Beschreibung für das Embed
     let description = '';
     for (const [channel, records] of Object.entries(groupedRecordings)) {
         description += `**${channel}:**\n`;
@@ -410,30 +383,28 @@ const uploadChannelFolder = (channel) => {
 
     const cloudFolderPath = `${config.rcloneRemote}:${config.rcloneFolder}/${channel}`;
 
-    // Verzeichnis in der Cloud erstellen, falls es nicht existiert
     const rcloneMkdirCommand = `rclone mkdir "${cloudFolderPath}" --config "${config.rcloneConfigPath}"`;
 
-    console.log(`Executing command to create cloud folder: ${rcloneMkdirCommand}`); // Debugging log
+    console.log(`Executing command to create cloud folder: ${rcloneMkdirCommand}`);
 
     const rcloneMkdirProcess = spawn(rcloneMkdirCommand, { shell: true });
 
     rcloneMkdirProcess.stdout.on('data', (data) => {
-        console.log(`rclone mkdir output: ${data.toString()}`); // Debugging log
+        console.log(`rclone mkdir output: ${data.toString()}`);
     });
 
     rcloneMkdirProcess.stderr.on('data', (data) => {
-        console.error(`Error output from rclone mkdir command: ${data.toString()}`); // Debugging log
+        console.error(`Error output from rclone mkdir command: ${data.toString()}`);
     });
 
     rcloneMkdirProcess.on('exit', (mkdirCode) => {
-        console.log(`rclone mkdir command exited with code: ${mkdirCode}`); // Debugging log
+        console.log(`rclone mkdir command exited with code: ${mkdirCode}`);
 
-        if (mkdirCode === 0 || mkdirCode === 3) { // 3 bedeutet Verzeichnis existiert bereits
+        if (mkdirCode === 0 || mkdirCode === 3) {
             const rcloneCheckCommand = `rclone lsf "${cloudFolderPath}" --config "${config.rcloneConfigPath}"`;
 
-            console.log(`Executing command to check cloud files: ${rcloneCheckCommand}`); // Debugging log
+            console.log(`Executing command to check cloud files: ${rcloneCheckCommand}`);
 
-            // Überprüfen, ob die Daten bereits in der Cloud vorhanden sind
             const rcloneCheckProcess = spawn(rcloneCheckCommand, { shell: true });
 
             let cloudFiles = '';
@@ -502,6 +473,113 @@ const uploadChannelFolder = (channel) => {
 
     rcloneMkdirProcess.on('error', (error) => {
         console.error(`Error creating cloud folder ${cloudFolderPath}: ${error.message}`);
+    });
+};
+
+// Funktion zum Aufnehmen eines m3u8 Streams
+const recordM3u8Stream = (url) => {
+    const id = crypto.randomBytes(4).toString('hex');
+    const timestamp = format(new Date(), 'dd-MM-yyyy_HH-mm-ss');
+    const m3u8Folder = path.join(config.recordingsPath, 'm3u8');
+    
+    // Erstelle den m3u8-Ordner, falls er nicht existiert
+    if (!fs.existsSync(m3u8Folder)) {
+        fs.mkdirSync(m3u8Folder, { recursive: true });
+    }
+    
+    const filename = path.join(m3u8Folder, `m3u8-${id}-${timestamp}.mp4`);
+
+    console.log(`Start recording m3u8 stream with ID: ${id}`);
+
+    const startRecording = () => {
+        const ytDlpProcess = spawn('yt-dlp', [
+            '-o', filename,
+            '--no-part',
+            '--live-from-start',
+            '--retry-sleep', '10',
+            '--fragment-retries', 'infinite',
+            '--hls-use-mpegts', 
+            '-f', 'best',  // Immer die beste Qualität verwenden
+            url
+        ], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        m3u8Processes.set(id, { ytDlpProcess, filename });
+
+        ytDlpProcess.on('exit', (code) => {
+            console.log(`Recording stopped for m3u8 stream with ID: ${id}, exit code: ${code}`);
+            
+            // Überprüfe, ob die Datei existiert und entferne .part, falls vorhanden
+            if (fs.existsSync(`${filename}.part`)) {
+                fs.renameSync(`${filename}.part`, filename);
+                console.log(`Renamed ${filename}.part to ${filename}`);
+            }
+
+            // Wenn der Prozess unerwartet beendet wurde, starte ihn neu
+            if (code !== 0 && m3u8Processes.has(id)) {
+                console.log(`Restarting recording for m3u8 stream with ID: **${id}**`);
+                startRecording();
+            } else {
+                m3u8Processes.delete(id);
+                // Starte den Upload-Prozess nach erfolgreicher Aufnahme
+                uploadToCloud(filename);
+            }
+        });
+    };
+
+    startRecording();
+
+    return id;
+};
+
+// Funktion zum Stoppen eines m3u8 Streams
+const stopM3u8Stream = (id) => {
+    if (m3u8Processes.has(id)) {
+        const { ytDlpProcess, filename } = m3u8Processes.get(id);
+        
+        // Sende SIGINT anstelle von SIGTERM
+        ytDlpProcess.kill('SIGINT');
+        
+        // Warte auf den Prozess, um ordnungsgemäß zu beenden
+        ytDlpProcess.on('exit', (code) => {
+            console.log(`yt-dlp process exited with code ${code}`);
+            
+            // Entferne .part Erweiterung, falls vorhanden
+            if (fs.existsSync(`${filename}.part`)) {
+                fs.renameSync(`${filename}.part`, filename);
+                console.log(`Renamed ${filename}.part to ${filename}`);
+            }
+            
+            m3u8Processes.delete(id);
+            console.log(`Stopped recording m3u8 stream with ID: ${id}`);
+            
+            // Starte den Upload-Prozess nach dem Stoppen der Aufnahme
+            uploadToCloud(filename);
+        });
+    } else {
+        console.log(`No recording process found for m3u8 stream with ID: ${id}`);
+    }
+};
+
+// Funktion zum Hochladen der Aufnahmen
+const uploadToCloud = (filename) => {
+    const channelPath = path.dirname(filename);
+    const channel = path.basename(channelPath);
+    const rcloneCommand = `rclone copy "${filename}" "${config.rcloneRemote}:${config.rcloneFolder}/${channel}" --config "${config.rcloneConfigPath}"`;
+
+    const rcloneProcess = spawn(rcloneCommand, { shell: true });
+
+    rcloneProcess.on('exit', (code) => {
+        if (code === 0) {
+            console.log(`Successfully uploaded ${filename} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+        } else {
+            console.error(`Failed to upload ${filename} to ${config.rcloneRemote}:${config.rcloneFolder}/${channel}`);
+        }
+    });
+
+    rcloneProcess.on('error', (error) => {
+        console.error(`Error uploading ${filename}: ${error.message}`);
     });
 };
 
@@ -591,6 +669,7 @@ client.on('messageCreate', async (message) => {
     if (command === '.recordings') {
         showRecordings(message);
     }
+
     if (command === '.delete') {
         const channel = args[0];
         if (!channel) {
@@ -602,6 +681,7 @@ client.on('messageCreate', async (message) => {
         const embed = createEmbed('Deleted', `Deleted local folder for channel: ${channel}`, '#ff0000');
         message.reply({ embeds: [embed] });
     }
+
     if (command === '.upload') {
         const channel = args[0];
         if (!channel) {
@@ -611,6 +691,30 @@ client.on('messageCreate', async (message) => {
         }
         uploadChannelFolder(channel);
         const embed = createEmbed('Uploading', `Started uploading folder for channel: ${channel}`, '#00ff00');
+        message.reply({ embeds: [embed] });
+    }
+
+    if (command === '.m3u8') {
+        const url = args[0];
+        if (!url) {
+            const embed = createEmbed('Error', 'Please provide a m3u8 URL.', '#ff0000');
+            message.reply({ embeds: [embed] });
+            return;
+        }
+        const id = recordM3u8Stream(url);
+        const embed = createEmbed('Recording M3U8', `Started recording m3u8 stream with ID: ${id}`, '#00ff00');
+        message.reply({ embeds: [embed] });
+    }
+
+    if (command === '.stop-m3u8') {
+        const id = args[0];
+        if (!id) {
+            const embed = createEmbed('Error', 'Please provide a m3u8 stream ID.', '#ff0000');
+            message.reply({ embeds: [embed] });
+            return;
+        }
+        stopM3u8Stream(id);
+        const embed = createEmbed('Stopped M3U8', `Stopped recording m3u8 stream with ID: ${id}`, '#ff0000');
         message.reply({ embeds: [embed] });
     }
 });

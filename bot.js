@@ -456,13 +456,11 @@ const uploadChannelFolder = (channel) => {
     });
 };
 
-// Funktion zum Aufnehmen eines m3u8 Streams
 const recordM3u8Stream = (url) => {
     const id = crypto.randomBytes(4).toString('hex');
     const timestamp = format(new Date(), 'dd-MM-yyyy_HH-mm-ss');
     const m3u8Folder = path.join(config.recordingsPath, 'm3u8');
     
-    // Erstelle den m3u8-Ordner, falls er nicht existiert
     if (!fs.existsSync(m3u8Folder)) {
         fs.mkdirSync(m3u8Folder, { recursive: true });
     }
@@ -470,40 +468,57 @@ const recordM3u8Stream = (url) => {
     const filename = path.join(m3u8Folder, `m3u8-${id}-${timestamp}.mp4`);
 
     console.log(`Start recording m3u8 stream with ID: ${id}`);
+    console.log(`URL: ${url}`);
+    console.log(`Output filename: ${filename}`);
 
     const startRecording = () => {
-        const ytDlpProcess = spawn('yt-dlp', [
+        const ytDlpArgs = [
             '-o', filename,
             '--no-part',
             '--live-from-start',
             '--retry-sleep', '10',
             '--fragment-retries', 'infinite',
             '--hls-use-mpegts', 
-            '-f', 'bestvideo+bestaudio/best',  // Versuche die beste Video- und Audioqualität zu kombinieren, falls verfügbar
+            '-f', 'bestvideo+bestaudio/best',
+            '--remux-video', 'mp4', // Ensure the output is saved as mp4
             url
-        ], {
+        ];
+        
+        console.log(`yt-dlp command: yt-dlp ${ytDlpArgs.join(' ')}`);
+
+        const ytDlpProcess = spawn('yt-dlp', ytDlpArgs, {
             stdio: ['ignore', 'pipe', 'pipe'],
         });
 
         m3u8Processes.set(id, { ytDlpProcess, filename });
 
+        ytDlpProcess.stdout.on('data', (data) => {
+            console.log(`yt-dlp stdout: ${data}`);
+        });
+
+        ytDlpProcess.stderr.on('data', (data) => {
+            console.error(`yt-dlp stderr: ${data}`);
+        });
+
         ytDlpProcess.on('exit', (code) => {
             console.log(`Recording stopped for m3u8 stream with ID: ${id}, exit code: ${code}`);
             
-            // Überprüfe, ob die Datei existiert und entferne .part, falls vorhanden
             if (fs.existsSync(`${filename}.part`)) {
                 fs.renameSync(`${filename}.part`, filename);
                 console.log(`Renamed ${filename}.part to ${filename}`);
             }
 
-            // Wenn der Prozess unerwartet beendet wurde, starte ihn neu
             if (code !== 0 && m3u8Processes.has(id)) {
-                console.log(`Restarting recording for m3u8 stream with ID: **${id}**`);
+                console.log(`Restarting recording for m3u8 stream with ID: ${id}`);
                 startRecording();
             } else {
                 m3u8Processes.delete(id);
-                // Starte den Upload-Prozess nach erfolgreicher Aufnahme
-                uploadToCloud(filename);
+                if (fs.existsSync(filename)) {
+                    console.log(`File ${filename} exists, size: ${fs.statSync(filename).size} bytes`);
+                    uploadToCloud(filename);
+                } else {
+                    console.error(`File ${filename} does not exist after recording`);
+                }
             }
         });
     };
@@ -546,9 +561,20 @@ const stopM3u8Stream = (id) => {
             // Starte den Upload-Prozess nach dem Stoppen der Aufnahme
             uploadToCloud(finalFilename);
         });
+
+        // Überprüfe, ob der Prozess nicht ordnungsgemäß beendet wurde und starte die Aufnahme neu
+        ytDlpProcess.on('error', (error) => {
+            console.error(`yt-dlp process error: ${error.message}`);
+            console.log(`Restarting recording for m3u8 stream with ID: ${id}`);
+            startRecording();
+        });
     } else {
         console.log(`No recording process found for m3u8 stream with ID: ${id}`);
     }
+    
+    // Entferne den Prozess aus der Liste, auch wenn er nicht gefunden wurde
+    m3u8Processes.delete(id);
+    console.log(`Forcefully stopped recording m3u8 stream with ID: ${id}`);
 };
 
 // Funktion zum Hochladen der Aufnahmen
@@ -726,8 +752,7 @@ const showHelp = (message) => {
         \`.list\` - Lists all recorded files with download links.
         \`.delete <channel>\` - Deletes the local folder for the specified channel.
         \`.upload <channel>\` - Uploads the folder for the specified channel.
-        \`.help\` - Displays this help message.
-        `;
+        \`.help\` - Displays this help message.`;
     const embed = createEmbed('Help', helpText, '#00ff00');
     message.reply({ embeds: [embed] });
 };
